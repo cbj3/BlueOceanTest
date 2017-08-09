@@ -1,0 +1,85 @@
+#!/usr/bin/env groovy
+try {
+  
+  node('maven') {
+    //notifyStarted()
+    // define Artifactory. Tested against Artifactory plugin 2.8.1
+    def artifactory = Artifactory.server 'BMS Artifactory'
+    artifactory.credentialsId = 'artifactory-deployer-credential'
+
+    // Get the Maven tool. Needs to be defined on the master.
+    def artifactoryMaven = Artifactory.newMavenBuild()
+    artifactoryMaven.tool = 'M3'
+    artifactoryMaven.deployer releaseRepo:'bms-training-release', snapshotRepo:'bms-training-snapshot', server: artifactory
+    artifactoryMaven.resolver releaseRepo:'bms-training-group', snapshotRepo:'bms-training-group', server: artifactory
+    def buildInfo = Artifactory.newBuildInfo()
+
+    stage ('Checkout') {
+      // Get some code from a GitHub repository
+      //git 'https://github.com/jglick/simple-maven-project-with-tests.git'
+      git credentialsId: '9093cfb8-27b0-4ca8-91ec-4d76e4aeb7f2', url: 'ssh://git@bitbucket-eng-rtp1.cisco.com:7999/bmstrn/spring-petclinic.git'
+    }
+
+    stage ('Build Java Application') {
+      // Run the maven build using Artifactory plugin
+      artifactoryMaven.run pom: 'pom.xml', goals: 'clean install', buildInfo: buildInfo
+
+      //Old way of running the maven build without the Artifactory plugin
+      //sh "'${mvnHome}/bin/mvn' -Dmaven.test.failure.ignore clean package"
+    }
+
+    stage ('Upload Java Artifacts') {
+      artifactory.publishBuildInfo(buildInfo)
+    }
+
+    stage ('SonarQube analysis') {
+      // Define SonarQube Scanner. Uses global tool config.
+      def scannerHome = tool 'BMS SonarQube';
+      env.WORKSPACE = pwd() //apparently env.WORKSPACE doesn't exist, you have to set it.
+
+      // The withSonarQubeEnv doesn't work unless you have the latest SQ plugin, 2.5
+      withSonarQubeEnv('BMS SonarQube') {
+        sh "${scannerHome}/bin/sonar-scanner " +
+          "-Dsonar.projectKey=bms-sonar-test-rtp " +
+          "-Dsonar.projectName=BMSTraining: " +
+          "-Dsonar.projectVersion=${env.BUILD_TAG} " +
+          "-Dsonar.sources=${env.WORKSPACE} " +
+          "-Dsonar.branch=training " +
+          "-Dsonar.dynamicAnalysis=reuseReports " +
+          "-Dsonar.junit.reportsPath=target/surefire-reports " +
+          "-Dsonar.jacoco.reportPath=target/jacoco.exec " +
+          "-Dsonar.binaries=target/classes " +
+          "-Dsonar.exclusions=src/main/webapp/assets/vendor/**/*,target/**/*"
+      }
+    }
+  }
+  node('docker') {
+    //Get Artifactory dockerhub.cisco.com ref.
+    docker.withRegistry('https://dockerhub.cisco.com/', 'artifactory-deployer-credential') {
+      stage ('Re-checkout code to get the Dockerfile')
+        git credentialsId: '9093cfb8-27b0-4ca8-91ec-4d76e4aeb7f2', url: 'ssh://git@bitbucket-eng-rtp1.cisco.com:7999/bmstrn/training.git'
+
+
+      stage ('Build Docker Image')
+        env.WORKSPACE = pwd() //apparently env.WORKSPACE doesn't exist, you have to set it.
+        def app = docker.build("bms-training-docker/training:${env.BUILD_TAG}", ".")
+
+      stage ('Publish Docker Image')
+        // publish container to Artifactory
+        app.push();
+        app.push('latest');
+    }
+  }
+
+} catch (e) {
+  currentBuild.result = "FAILED"
+  throw e
+}
+def notifyStarted() {
+    //see https://developer.ciscospark.com
+    def postContent = """{
+            "toPersonId": "Y2lzY29zcGFyazovL3VzL1BFT1BMRS8yYTExZGE2Yy03YzYzLTRkMDYtYWZiZS0zZTc4ODllMDFlNjE",
+            "markdown": "**Started job:** \'${env.JOB_NAME}\'. **View Results here:** ${env.BUILD_URL} <U+1F60E>"}"""
+    httpRequest customHeaders: [[maskValue: false, name: 'content-type', value: 'application/json; charset=utf-8'], [maskValue: true, name: 'Authorization', value: 'Bearer NWNiMmMxODUtYjM3Yy00NzZlLTkxYjItMjU4NmEzMTkyOGY5Nzc3Y2QzYTMtY2E3']], httpMode: 'POST',
+    requestBody: postContent, responseHandle: 'NONE', url: 'https://api.ciscospark.com/v1/messages'
+}
