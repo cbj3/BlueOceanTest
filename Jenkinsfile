@@ -1,7 +1,7 @@
 pipeline {
   agent {
-    docker {
-      image 'training:${env.BUILD_TAG}'
+    node {
+      label 'docker'
     }
     
   }
