@@ -1,5 +1,10 @@
 pipeline {
-  agent any
+  agent {
+    docker {
+      image 'training:${env.BUILD_TAG}'
+    }
+    
+  }
   stages {
     stage('Build') {
       steps {
