@@ -45,7 +45,7 @@ pipeline {
     stage('Docker Build') {
       steps {
         script {
-          withDockerRegistry([credentialsId: 'docker-credential', registry: 'https://dockerhub.cisco.com/']) {
+          withDockerRegistry([credentialsId: 'fae7e791-df21-4789-b8e5-e7075e48a2eb', registry: 'https://dockerhub.cisco.com/']) {
             def app = docker.build("dockerhub.cisco.com/bms-training-docker/training:${env.BUILD_TAG}", ".")
             app.push();
           }
