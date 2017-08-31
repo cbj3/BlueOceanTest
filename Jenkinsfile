@@ -46,7 +46,7 @@ pipeline {
       steps {
         script {
           withDockerRegistry([credentialsId: 'docker-credential', registry: 'https://dockerhub.cisco.com/']) {
-            def app = docker.build("dockerhub.cisco.com/training:${env.BUILD_TAG}", ".")
+            def app = docker.build("dockerhub.cisco.com/bms-training-docker/training:${env.BUILD_TAG}", ".")
             app.push();
           }
         }
